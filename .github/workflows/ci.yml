@@ -1,0 +1,97 @@
+
+name: Security Reporting Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sast:
+    name: SAST - Semgrep
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout reference application
+        uses: actions/checkout@v4
+        with:
+          repository: juice-shop/juice-shop
+          path: target
+
+      - name: Install Semgrep
+        run: python -m pip install semgrep
+
+      - name: Run Semgrep JSON report
+        id: semgrep
+        continue-on-error: true
+        run: |
+          semgrep scan \
+            --config auto \
+            --json \
+            --output semgrep-results.json \
+            target
+
+      - name: Upload SAST report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sast-evidence
+          path: semgrep-results.json
+          if-no-files-found: warn
+
+  sca:
+    name: SCA - Trivy filesystem
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout reference application
+        uses: actions/checkout@v4
+        with:
+          repository: juice-shop/juice-shop
+          path: target
+
+      - name: Run Trivy filesystem report
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: target
+          scanners: vuln
+          format: json
+          output: trivy-fs-results.json
+          severity: CRITICAL,HIGH,MEDIUM
+          exit-code: "0"
+
+      - name: Upload SCA report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sca-evidence
+          path: trivy-fs-results.json
+          if-no-files-found: warn
+
+  secrets:
+    name: Secrets - Gitleaks
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout reference application history
+        uses: actions/checkout@v4
+        with:
+          repository: juice-shop/juice-shop
+          path: target
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        continue-on-error: true
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
